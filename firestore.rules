@@ -1,0 +1,267 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 0. Global Safety Net: Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common Security Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Strict regex & size check to prevent ID poisoning and denial-of-wallet resource attacks
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.:]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Role verification against trusted admin document or verified admin email
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'jonnysteedman683@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 1. Operator Profiles & Settings (PII Protected)
+    function isValidUser(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+        (!('callsign' in data) || (data.callsign is string && data.callsign.size() <= 64)) &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 128)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 256)) &&
+        (!('clearanceLevel' in data) || (data.clearanceLevel is string && data.clearanceLevel.size() <= 64)) &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1024));
+    }
+
+    match /users/{userId} {
+      // PII protected: users can only inspect their own profile, or admin can inspect
+      allow get: if isSignedIn() && (isOwner(userId) || isAdmin()) && isValidId(userId);
+      // Disallow blanket user enumeration
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // 2. Mission Directives & Tactical Orders
+    function isValidDirective(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+        data.id is string && data.id.size() <= 128 &&
+        data.codename is string && data.codename.size() <= 128 &&
+        data.directiveText is string && data.directiveText.size() <= 4000 &&
+        (!('sectorTarget' in data) || (data.sectorTarget is string && data.sectorTarget.size() <= 128)) &&
+        (!('status' in data) || (data.status is string && data.status.size() <= 64)) &&
+        (!('clearanceLevel' in data) || (data.clearanceLevel is string && data.clearanceLevel.size() <= 64)) &&
+        (!('assignedUnits' in data) || (data.assignedUnits is list && data.assignedUnits.size() <= 64));
+    }
+
+    match /directives/{directiveId} {
+      // Directives can only be viewed by the creator or admin
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidId(directiveId);
+      // Secure list query: client must query by owner or be admin
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(directiveId) && isValidDirective(incoming());
+      allow update: if isSignedIn() && isValidId(directiveId) && 
+        (existing().userId == request.auth.uid || isAdmin()) && 
+        isValidDirective(incoming()) && 
+        incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(directiveId) && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    // 3. Telemetry & Node Attestation Logs (Append-Only Audit Trail)
+    function isValidTelemetry(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+        data.id is string && data.id.size() <= 128 &&
+        data.summary is string && data.summary.size() <= 4000 &&
+        data.timestamp is number &&
+        (!('nodeId' in data) || (data.nodeId is string && data.nodeId.size() <= 128)) &&
+        (!('status' in data) || (data.status is string && data.status.size() <= 64)) &&
+        (!('signatureHash' in data) || (data.signatureHash is string && data.signatureHash.size() <= 256));
+    }
+
+    match /telemetry_logs/{logId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidId(logId);
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(logId) && isValidTelemetry(incoming());
+      // Telemetry logs are strictly append-only: updates are rejected to preserve tamper-evidence
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    // 4. Tactical Chat Sessions & Master-Gated Messages
+    function isValidChatSession(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+        (!('title' in data) || (data.title is string && data.title.size() <= 128));
+    }
+
+    match /chat_sessions/{sessionId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidId(sessionId);
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(sessionId) && isValidChatSession(incoming());
+      allow update: if isSignedIn() && isValidId(sessionId) && 
+        (existing().userId == request.auth.uid || isAdmin()) && 
+        isValidChatSession(incoming()) && 
+        incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(sessionId) && (existing().userId == request.auth.uid || isAdmin());
+
+      // Master Gate: Child messages derive permission directly from parent chat_sessions document
+      match /messages/{messageId} {
+        function isSessionOwner() {
+          return get(/databases/$(database)/documents/chat_sessions/$(sessionId)).data.userId == request.auth.uid;
+        }
+
+        allow get, list: if isSignedIn() && (isSessionOwner() || isAdmin());
+        allow create: if isSignedIn() && isValidId(messageId) && (isSessionOwner() || isAdmin()) &&
+          incoming().content is string && incoming().content.size() <= 10000 &&
+          incoming().role in ['user', 'model', 'system'];
+        // Immutable conversation record
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidId(messageId) && (isSessionOwner() || isAdmin());
+      }
+    }
+
+    // 5. Tactical Mesh Multi-Operator Cloud Sync
+    function isValidMission(data) {
+      return data.id is string && data.id.size() <= 64 &&
+        data.code is string && data.code.size() <= 32 &&
+        data.name is string && data.name.size() <= 128 &&
+        data.ownerId is string && data.ownerId.size() <= 128 &&
+        data.createdAt is number &&
+        (!('frequency' in data) || (data.frequency is string && data.frequency.size() <= 32)) &&
+        (!('modemPreset' in data) || (data.modemPreset is string && data.modemPreset.size() <= 64)) &&
+        (!('operatorCount' in data) || data.operatorCount is number) &&
+        (!('updatedAt' in data) || data.updatedAt is number);
+    }
+
+    function isValidMissionNode(data) {
+      return data.id is string && data.id.size() <= 64 &&
+        data.missionId is string && data.missionId.size() <= 64 &&
+        data.num is number &&
+        data.shortName is string && data.shortName.size() <= 16 &&
+        data.longName is string && data.longName.size() <= 64 &&
+        (!('hwModel' in data) || (data.hwModel is string && data.hwModel.size() <= 64)) &&
+        (!('role' in data) || (data.role is string && data.role.size() <= 32)) &&
+        (!('snr' in data) || data.snr is number) &&
+        (!('rssi' in data) || data.rssi is number) &&
+        (!('batteryLevel' in data) || data.batteryLevel is number) &&
+        (!('voltage' in data) || data.voltage is number) &&
+        (!('channelUtilization' in data) || data.channelUtilization is number) &&
+        (!('airUtilTx' in data) || data.airUtilTx is number) &&
+        (!('latitude' in data) || data.latitude is number) &&
+        (!('longitude' in data) || data.longitude is number) &&
+        (!('altitude' in data) || data.altitude is number) &&
+        (!('lastHeard' in data) || data.lastHeard is number) &&
+        (!('reportedBy' in data) || (data.reportedBy is string && data.reportedBy.size() <= 128));
+    }
+
+    function isValidMissionWaypoint(data) {
+      return data.id is string && data.id.size() <= 128 &&
+        data.missionId is string && data.missionId.size() <= 64 &&
+        data.title is string && data.title.size() <= 128 &&
+        data.latitude is number &&
+        data.longitude is number &&
+        data.category is string && data.category.size() <= 32 &&
+        data.createdAt is number &&
+        (!('altitude' in data) || data.altitude is number) &&
+        (!('color' in data) || (data.color is string && data.color.size() <= 32)) &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 512)) &&
+        (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 128));
+    }
+
+    function isValidMissionMessage(data) {
+      return data.id is string && data.id.size() <= 128 &&
+        data.missionId is string && data.missionId.size() <= 64 &&
+        data.from is number &&
+        data.fromName is string && data.fromName.size() <= 64 &&
+        data.text is string && data.text.size() <= 2048 &&
+        data.timestamp is number &&
+        (!('to' in data) || data.to is number) &&
+        (!('channel' in data) || data.channel is number) &&
+        (!('rxSnr' in data) || data.rxSnr is number) &&
+        (!('rxRssi' in data) || data.rxRssi is number) &&
+        (!('hopLimit' in data) || data.hopLimit is number) &&
+        (!('isAcked' in data) || data.isAcked is bool) &&
+        (!('senderOperator' in data) || (data.senderOperator is string && data.senderOperator.size() <= 128));
+    }
+
+    function isValidMissionSos(data) {
+      return data.id is string && data.id.size() <= 64 &&
+        data.missionId is string && data.missionId.size() <= 64 &&
+        data.active is bool &&
+        data.timestamp is number &&
+        (!('initiatorName' in data) || (data.initiatorName is string && data.initiatorName.size() <= 64)) &&
+        (!('initiatorNodeNum' in data) || data.initiatorNodeNum is number) &&
+        (!('latitude' in data) || data.latitude is number) &&
+        (!('longitude' in data) || data.longitude is number) &&
+        (!('altitude' in data) || data.altitude is number) &&
+        (!('emergencyType' in data) || (data.emergencyType is string && data.emergencyType.size() <= 64)) &&
+        (!('message' in data) || (data.message is string && data.message.size() <= 512)) &&
+        (!('acknowledgedBy' in data) || (data.acknowledgedBy is string && data.acknowledgedBy.size() <= 128));
+    }
+
+    match /mesh_missions/{missionId} {
+      allow get: if isSignedIn() && isValidId(missionId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(missionId) && isValidMission(incoming()) && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(missionId) && isValidMission(incoming()) && 
+        (incoming().ownerId == existing().ownerId || isAdmin());
+      allow delete: if isSignedIn() && isValidId(missionId) && (existing().ownerId == request.auth.uid || isAdmin());
+
+      match /nodes/{nodeId} {
+        allow get: if isSignedIn() && isValidId(nodeId);
+        allow list: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidId(nodeId) && isValidMissionNode(incoming()) && incoming().missionId == missionId;
+        allow delete: if isSignedIn() && isValidId(nodeId) && (get(/databases/$(database)/documents/mesh_missions/$(missionId)).data.ownerId == request.auth.uid || isAdmin());
+      }
+
+      match /waypoints/{waypointId} {
+        allow get: if isSignedIn() && isValidId(waypointId);
+        allow list: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidId(waypointId) && isValidMissionWaypoint(incoming()) && incoming().missionId == missionId;
+        allow delete: if isSignedIn() && isValidId(waypointId);
+      }
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(messageId);
+        allow list: if isSignedIn();
+        allow create: if isSignedIn() && isValidId(messageId) && isValidMissionMessage(incoming()) && incoming().missionId == missionId;
+        allow update: if false; // Append-only immutable mesh packet history
+        allow delete: if isSignedIn() && isValidId(messageId) && (get(/databases/$(database)/documents/mesh_missions/$(missionId)).data.ownerId == request.auth.uid || isAdmin());
+      }
+
+      match /sos/{sosId} {
+        allow get: if isSignedIn() && isValidId(sosId);
+        allow list: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidId(sosId) && isValidMissionSos(incoming()) && incoming().missionId == missionId;
+        allow delete: if isSignedIn() && isValidId(sosId) && (get(/databases/$(database)/documents/mesh_missions/$(missionId)).data.ownerId == request.auth.uid || isAdmin());
+      }
+    }
+
+    // 6. Admin RBAC Enclave
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && (request.auth.uid == adminId || isAdmin()) && isValidId(adminId);
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin() && isValidId(adminId);
+    }
+
+    // 7. Test & Health Diagnostic Connection Path
+    match /test/{testDoc} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

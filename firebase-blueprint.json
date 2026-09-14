@@ -1,0 +1,229 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile, callsign, and clearance level for authenticated tactical operators",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "callsign": { "type": "string", "maxLength": 64 },
+        "clearanceLevel": { "type": "string", "maxLength": 64 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "createdAt": { "type": "number" },
+        "lastLoginAt": { "type": "number" }
+      },
+      "required": ["userId"]
+    },
+    "Directive": {
+      "title": "Mission Directive",
+      "description": "Tactical directive orders for autonomous units and coordinators",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "codename": { "type": "string", "maxLength": 128 },
+        "directiveText": { "type": "string", "maxLength": 4000 },
+        "sectorTarget": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 64 },
+        "clearanceLevel": { "type": "string", "maxLength": 64 },
+        "assignedUnits": { "type": "array" },
+        "createdAt": { "type": "number" },
+        "savedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "codename", "directiveText"]
+    },
+    "TelemetryLog": {
+      "title": "Attested Telemetry Log",
+      "description": "Persisted mesh node telemetry and cryptographic attestation entries",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "nodeId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "maxLength": 64 },
+        "summary": { "type": "string", "maxLength": 4000 },
+        "signatureHash": { "type": "string", "maxLength": 256 },
+        "timestamp": { "type": "number" },
+        "recordedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "summary", "timestamp"]
+    },
+    "ChatSession": {
+      "title": "Tactical Chat Session",
+      "description": "Session container for multi-turn AI intelligence transcripts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "number" },
+        "lastActivityAt": { "type": "number" }
+      },
+      "required": ["userId"]
+    },
+    "ChatMessage": {
+      "title": "AI Assistant Chat Message",
+      "description": "Multi-turn Gemini tactical conversation message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sessionId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "role": { "type": "string", "enum": ["user", "model", "system"] },
+        "content": { "type": "string", "maxLength": 10000 },
+        "modelName": { "type": "string", "maxLength": 64 },
+        "persona": { "type": "string", "maxLength": 64 },
+        "groundingSources": { "type": "array" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["role", "content", "timestamp"]
+    },
+    "MeshMission": {
+      "title": "Mesh Tactical Mission Operation",
+      "description": "Tactical session room coordinating multi-operator field sync across Meshtastic nodes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "code": { "type": "string", "maxLength": 32 },
+        "name": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "frequency": { "type": "string", "maxLength": 32 },
+        "modemPreset": { "type": "string", "maxLength": 64 },
+        "operatorCount": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "code", "name", "ownerId", "createdAt"]
+    },
+    "MeshMissionNode": {
+      "title": "Synchronized Mesh Node",
+      "description": "Real-time Meshtastic node state shared across operators",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "missionId": { "type": "string", "maxLength": 64 },
+        "num": { "type": "number" },
+        "shortName": { "type": "string", "maxLength": 16 },
+        "longName": { "type": "string", "maxLength": 64 },
+        "hwModel": { "type": "string", "maxLength": 64 },
+        "role": { "type": "string", "maxLength": 32 },
+        "snr": { "type": "number" },
+        "rssi": { "type": "number" },
+        "batteryLevel": { "type": "number" },
+        "voltage": { "type": "number" },
+        "channelUtilization": { "type": "number" },
+        "airUtilTx": { "type": "number" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "altitude": { "type": "number" },
+        "lastHeard": { "type": "number" },
+        "reportedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "missionId", "num", "shortName", "longName"]
+    },
+    "MeshMissionWaypoint": {
+      "title": "Synchronized Tactical Waypoint",
+      "description": "Tactical navigation point shared on map across operators",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "missionId": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 128 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "altitude": { "type": "number" },
+        "category": { "type": "string", "maxLength": 32 },
+        "color": { "type": "string", "maxLength": 32 },
+        "description": { "type": "string", "maxLength": 512 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "missionId", "title", "latitude", "longitude", "category", "createdAt"]
+    },
+    "MeshMissionMessage": {
+      "title": "Synchronized LoRa Packet Message",
+      "description": "Mesh text packet log broadcast and received by all operators",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "missionId": { "type": "string", "maxLength": 64 },
+        "from": { "type": "number" },
+        "fromName": { "type": "string", "maxLength": 64 },
+        "to": { "type": "number" },
+        "text": { "type": "string", "maxLength": 2048 },
+        "channel": { "type": "number" },
+        "rxSnr": { "type": "number" },
+        "rxRssi": { "type": "number" },
+        "hopLimit": { "type": "number" },
+        "isAcked": { "type": "boolean" },
+        "senderOperator": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "missionId", "from", "fromName", "text", "timestamp"]
+    },
+    "MeshMissionSos": {
+      "title": "Synchronized Emergency SOS Beacon",
+      "description": "Tactical emergency SOS state synced across all mission operators",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "missionId": { "type": "string", "maxLength": 64 },
+        "active": { "type": "boolean" },
+        "initiatorName": { "type": "string", "maxLength": 64 },
+        "initiatorNodeNum": { "type": "number" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "altitude": { "type": "number" },
+        "emergencyType": { "type": "string", "maxLength": 64 },
+        "message": { "type": "string", "maxLength": 512 },
+        "timestamp": { "type": "number" },
+        "acknowledgedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "missionId", "active", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Authenticated tactical operator profiles with clearance levels"
+    },
+    "/directives/{directiveId}": {
+      "schema": { "$ref": "#/entities/Directive" },
+      "description": "Operational directives dispatched to squad and swarm nodes"
+    },
+    "/telemetry_logs/{logId}": {
+      "schema": { "$ref": "#/entities/TelemetryLog" },
+      "description": "Tamper-evident cryptographically signed telemetry and node audit logs"
+    },
+    "/chat_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ChatSession" },
+      "description": "Parent session container for tactical multi-turn conversations"
+    },
+    "/chat_sessions/{sessionId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Individual intelligence prompts and grounded responses"
+    },
+    "/mesh_missions/{missionId}": {
+      "schema": { "$ref": "#/entities/MeshMission" },
+      "description": "Tactical mission room coordinating multi-operator field sync"
+    },
+    "/mesh_missions/{missionId}/nodes/{nodeId}": {
+      "schema": { "$ref": "#/entities/MeshMissionNode" },
+      "description": "Live Meshtastic node telemetry synced across operators"
+    },
+    "/mesh_missions/{missionId}/waypoints/{waypointId}": {
+      "schema": { "$ref": "#/entities/MeshMissionWaypoint" },
+      "description": "Real-time tactical waypoints and LZ navigation coordinates"
+    },
+    "/mesh_missions/{missionId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/MeshMissionMessage" },
+      "description": "Synchronized multi-channel LoRa packets and command chat logs"
+    },
+    "/mesh_missions/{missionId}/sos/{sosId}": {
+      "schema": { "$ref": "#/entities/MeshMissionSos" },
+      "description": "Emergency distress status and acknowledgment sync across operators"
+    }
+  }
+}

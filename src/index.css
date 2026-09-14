@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-tactical: 'Chakra Petch', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    letter-spacing: -0.01em;
+  }
+
+  h1, h2, h3, .font-tactical {
+    font-family: var(--font-tactical);
+    letter-spacing: 0.02em;
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Tactical HUD Reticles & Engineering Accents */
+.tactical-border {
+  position: relative;
+}
+.tactical-border::before,
+.tactical-border::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+}
+.tactical-border::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1.5px solid rgba(56, 189, 248, 0.6);
+  border-left: 1.5px solid rgba(56, 189, 248, 0.6);
+}
+.tactical-border::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1.5px solid rgba(56, 189, 248, 0.6);
+  border-right: 1.5px solid rgba(56, 189, 248, 0.6);
+}
+
+/* Custom Tactical Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.8);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.8);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.9);
+}
+
+/* Subtle Tactical Grid Background */
+.bg-tactical-grid {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(51, 65, 85, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(51, 65, 85, 0.12) 1px, transparent 1px);
+}

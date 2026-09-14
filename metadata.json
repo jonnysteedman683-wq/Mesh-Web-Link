@@ -1,0 +1,7 @@
+{
+  "name": "Mesh Link Connection Fabric",
+  "description": "Military-grade C4ISR tactical battle management with Meshtastic WebBluetooth (BLE) LoRa, STANAG 4586 / MAVLink v2 autopilot telemetry, ATAK Cursor-on-Target (CoT) XML gateway, WebUSB SDR & WebHID controllers, 100kW Directed-Energy Laser & Counter-UAS, Post-Quantum Lattice Cryptography, and biometric Citadel vault enclaves.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
