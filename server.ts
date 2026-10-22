@@ -8,6 +8,14 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
+import {
+  AgentTokenStore,
+  clientIp,
+  createMeshAuth,
+  getOperatorToken,
+  isAuthorizedUpgrade,
+  operatorTokenWasGenerated,
+} from "./src/server/meshAuth";
 
 const execAsync = promisify(exec);
 
@@ -35,13 +43,13 @@ const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
 const MAX_REQUESTS_PER_WINDOW = 120; // 120 reqs/min per client IP
 
 app.use("/api/", (req, res, next) => {
-  const forwarded = req.headers["x-forwarded-for"];
-  const clientIp = (typeof forwarded === "string" ? forwarded : req.socket.remoteAddress || "127.0.0.1").split(",")[0].trim();
+  // X-Forwarded-For is client-controlled unless TRUST_PROXY=1 (see clientIp).
+  const ip = clientIp(req);
   const now = Date.now();
-  const record = rateLimitMap.get(clientIp);
+  const record = rateLimitMap.get(ip);
 
   if (!record || now > record.resetTime) {
-    rateLimitMap.set(clientIp, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
     return next();
   }
 
@@ -152,6 +160,12 @@ let citadelBankAccounts = {
 };
 
 const registeredExternalAgents = new Map<string, ExternalAgentRecord>();
+const agentTokens = new AgentTokenStore();
+
+// Every /api route except GET /api/health needs the operator token; registered
+// agents may use their own token for heartbeat, telemetry and directive polling.
+// Registered here, before any route, so it runs first.
+app.use("/api", createMeshAuth(agentTokens));
 const pendingDirectivesQueue: PendingDirective[] = [];
 const externalTelemetrySubmissions: ExternalTelemetrySubmission[] = [];
 
@@ -196,7 +210,7 @@ app.post("/api/mesh/agents/register", (req, res) => {
     return res.status(400).json({ error: "Agent name is required" });
   }
 
-  const id = `ext-agent-${Math.random().toString(36).substring(2, 9)}`;
+  const id = `ext-agent-${crypto.randomBytes(6).toString("hex")}`;
   const agent: ExternalAgentRecord = {
     id,
     name: String(name),
@@ -210,17 +224,20 @@ app.post("/api/mesh/agents/register", (req, res) => {
   };
 
   registeredExternalAgents.set(id, agent);
+  const token = agentTokens.issue(id);
 
   res.json({
     message: "External agent registered into mesh fabric successfully",
     agent,
-    token: `mesh_tok_${id}_${Date.now()}`,
+    // Shown once; only its hash is kept. Send as "Authorization: Bearer <token>".
+    token,
   });
 });
 
 // External Agent Heartbeat & Telemetry update
-app.post("/api/mesh/agents/heartbeat", (req, res) => {
-  const { agentId, telemetry } = req.body;
+app.post("/api/mesh/agents/heartbeat", (req: any, res) => {
+  const { telemetry } = req.body;
+  const agentId = req.meshAgentId ?? req.body.agentId;
   const agent = registeredExternalAgents.get(agentId);
   if (!agent) {
     return res.status(404).json({ error: "Agent not found" });
@@ -304,8 +321,9 @@ app.get("/api/mesh/directives", (req, res) => {
 });
 
 // Submit real telemetry & cryptographic proof from external agent
-app.post("/api/mesh/agents/submit-telemetry", (req, res) => {
-  const { agentId, missionId, unitId, status, summary, metrics, signatureHash } = req.body;
+app.post("/api/mesh/agents/submit-telemetry", (req: any, res) => {
+  const { missionId, unitId, status, summary, metrics, signatureHash } = req.body;
+  const agentId = req.meshAgentId ?? req.body.agentId;
   if (!summary) {
     return res.status(400).json({ error: "Telemetry summary is required" });
   }
@@ -1632,34 +1650,42 @@ app.get("/api/mesh/sample-agent-script", (req, res) => {
 Mesh Link External Agent Client
 Connects real autonomous scripts / swarms into the Mesh Link Connection Fabric.
 """
+import os
 import time
 import requests
 import json
 import hashlib
 
-SERVER_URL = "http://localhost:3000"
+SERVER_URL = os.environ.get("MESH_SERVER_URL", "http://localhost:3000")
+# Registration needs the operator token the server prints at startup.
+OPERATOR_TOKEN = os.environ["MESH_OPERATOR_TOKEN"]
 
 def run_agent():
     print("[*] Registering external agent into Mesh Fabric...")
-    reg_resp = requests.post(f"{SERVER_URL}/api/mesh/agents/register", json={
+    reg_resp = requests.post(f"{SERVER_URL}/api/mesh/agents/register", headers={
+        "Authorization": f"Bearer {OPERATOR_TOKEN}"
+    }, json={
         "name": "Python Recon Drone Unit",
         "role": "swarm",
         "type": "External Robotics / Python Worker",
         "capabilities": ["real_sensor_telemetry", "hardware_monitor", "hash_attestation"]
     })
+    reg_resp.raise_for_status()
     data = reg_resp.json()
     agent_id = data["agent"]["id"]
+    # From here on the agent uses its own token, which only works for itself.
+    agent_auth = {"Authorization": f"Bearer {data['token']}"}
     print(f"[+] Agent Registered! ID: {agent_id}")
 
     while True:
         # 1. Send Heartbeat
-        requests.post(f"{SERVER_URL}/api/mesh/agents/heartbeat", json={
+        requests.post(f"{SERVER_URL}/api/mesh/agents/heartbeat", headers=agent_auth, json={
             "agentId": agent_id,
             "telemetry": "Active scanning loop. Hardware temp: 38C. RF Noise: -94dBm."
         })
 
         # 2. Check for Directives
-        dir_resp = requests.get(f"{SERVER_URL}/api/mesh/agents/directives").json()
+        dir_resp = requests.get(f"{SERVER_URL}/api/mesh/agents/directives", headers=agent_auth).json()
         directives = dir_resp.get("directives", [])
         if directives:
             print(f"[!] Received {len(directives)} directives from Command (Me)!")
@@ -1667,7 +1693,7 @@ def run_agent():
         # 3. Submit real-time attested findings
         findings = f"Live sweep verified at {time.strftime('%X')}. Latency: 4ms. Zero anomalies."
         sig = "sha256:" + hashlib.sha256(findings.encode()).hexdigest()[:16]
-        requests.post(f"{SERVER_URL}/api/mesh/agents/submit-telemetry", json={
+        requests.post(f"{SERVER_URL}/api/mesh/agents/submit-telemetry", headers=agent_auth, json={
             "agentId": agent_id,
             "unitId": "node-swarm-sensor",
             "status": "success",
@@ -1689,7 +1715,12 @@ if __name__ == "__main__":
 // -------------------------------------------------------------
 async function startServer() {
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server, path: "/ws/mesh" });
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws/mesh",
+    // Browsers cannot set headers on WebSockets, so the operator token is ?token=.
+    verifyClient: (info: { req: http.IncomingMessage }) => isAuthorizedUpgrade(info.req.url),
+  });
 
   const broadcastToPeers = (payload: any, excludePeerId?: string) => {
     const data = JSON.stringify(payload);
@@ -1810,6 +1841,11 @@ async function startServer() {
 
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Mesh Link Full-Stack Server (HTTP + WebSocket/WebRTC) running on port ${PORT}`);
+    const link = `http://localhost:${PORT}/?operator_token=${encodeURIComponent(getOperatorToken())}`;
+    if (operatorTokenWasGenerated()) {
+      console.log("🔐 MESH_OPERATOR_TOKEN not set; generated an operator token for this run.");
+    }
+    console.log(`🔑 Open the console signed in: ${link}`);
   });
 }
 

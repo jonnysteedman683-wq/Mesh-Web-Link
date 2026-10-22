@@ -109,31 +109,34 @@ export const AgentGatewayModal: React.FC<AgentGatewayModalProps> = ({ isOpen, on
     }
   };
 
+  // Registration needs the operator token; after that the agent uses the token it gets back.
   const curlRegisterExample = `curl -X POST http://localhost:3000/api/mesh/agents/register \\
+  -H "Authorization: Bearer $MESH_OPERATOR_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{"name":"Autonomous Drone Alpha","role":"swarm","type":"Python Edge Agent"}'`;
 
   const curlTelemetryExample = `curl -X POST http://localhost:3000/api/mesh/agents/submit-telemetry \\
+  -H "Authorization: Bearer $AGENT_TOKEN" \\
   -H "Content-Type: application/json" \\
-  -d '{"agentId":"ext-agent-YOUR_ID","summary":"LiDAR obstacle sweep clear. Latency: 3ms.","unitId":"node-swarm-sensor"}'`;
+  -d '{"summary":"LiDAR obstacle sweep clear. Latency: 3ms.","unitId":"node-swarm-sensor"}'`;
 
-  const pythonScriptExample = `import time, requests, hashlib
+  const pythonScriptExample = `import os, time, requests
 
 SERVER = "http://localhost:3000"
+OPERATOR_TOKEN = os.environ["MESH_OPERATOR_TOKEN"]  # printed by the server at startup
 
-# 1. Register with Mesh Fabric
-reg = requests.post(f"{SERVER}/api/mesh/agents/register", json={
-    "name": "Python Autonomous Worker",
-    "role": "swarm",
-    "type": "External Robotics Client"
-}).json()
+# 1. Register with Mesh Fabric (operator token)
+reg = requests.post(f"{SERVER}/api/mesh/agents/register",
+    headers={"Authorization": f"Bearer {OPERATOR_TOKEN}"},
+    json={"name": "Python Autonomous Worker", "role": "swarm", "type": "External Robotics Client"},
+).json()
 agent_id = reg["agent"]["id"]
+agent_auth = {"Authorization": f"Bearer {reg['token']}"}  # works only for this agent
 print(f"Connected to Mesh Fabric! Agent ID: {agent_id}")
 
 while True:
-    # 2. Heartbeat & Telemetry
-    requests.post(f"{SERVER}/api/mesh/agents/heartbeat", json={
-        "agentId": agent_id,
+    # 2. Heartbeat & Telemetry (agent token)
+    requests.post(f"{SERVER}/api/mesh/agents/heartbeat", headers=agent_auth, json={
         "telemetry": "All systems nominal. RF signal -82dBm."
     })
     time.sleep(5)`;

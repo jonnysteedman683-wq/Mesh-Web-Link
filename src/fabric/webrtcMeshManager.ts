@@ -1,4 +1,5 @@
 import { PhysicalPeerDevice, P2PMessagePacket, P2PBenchmarkResult } from '../types';
+import { withOperatorToken } from '../services/operatorAuth';
 
 export class WebRtcMeshManager {
   private static instance: WebRtcMeshManager;
@@ -161,7 +162,7 @@ export class WebRtcMeshManager {
       const host = window.location.host;
       const wsUrl = `${protocol}//${host}/ws/mesh`;
 
-      this.ws = new WebSocket(wsUrl);
+      this.ws = new WebSocket(withOperatorToken(wsUrl));
 
       this.ws.onopen = () => {
         this.isConnecting = false;
